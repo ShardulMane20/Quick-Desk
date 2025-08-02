@@ -1,5 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { auth,} from "@/firebase";
+import { db } from "@/firebase";
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+} from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,33 +25,70 @@ export default function Auth() {
     email: "",
     password: "",
     confirmPassword: "",
-    role: "end_user"
+    role: "end_user",
   });
 
-  const handleLogin = (e: React.FormEvent) => {
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Login
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Mock authentication
-    localStorage.setItem("user", JSON.stringify({ 
-      email: loginData.email, 
-      role: "end_user",
-      name: "John Doe"
-    }));
-    navigate("/dashboard");
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, loginData.email, loginData.password);
+      navigate("/dashboard");
+    } catch (err: any) {
+      if (err.code === "auth/user-not-found") {
+        setAuthError("No user found with this email.");
+      } else if (err.code === "auth/wrong-password") {
+        setAuthError("Incorrect password.");
+      } else {
+        setAuthError("Login failed. Please try again.");
+      }
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  // Register
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
+
     if (registerData.password !== registerData.confirmPassword) {
-      alert("Passwords don't match");
+      setAuthError("Passwords don't match.");
       return;
     }
-    // Mock registration
-    localStorage.setItem("user", JSON.stringify({ 
-      email: registerData.email, 
-      role: registerData.role,
-      name: `${registerData.firstName} ${registerData.lastName}`
-    }));
-    navigate("/dashboard");
+
+    setAuthLoading(true);
+    try {
+      const userCred = await createUserWithEmailAndPassword(
+        auth,
+        registerData.email,
+        registerData.password
+      );
+
+      await setDoc(doc(db, "users", userCred.user.uid), {
+        email: registerData.email,
+        firstName: registerData.firstName,
+        lastName: registerData.lastName,
+        role: registerData.role,
+      });
+
+      navigate("/dashboard");
+    } catch (err: any) {
+      if (err.code === "auth/email-already-in-use") {
+        setAuthError("Email already in use.");
+      } else if (err.code === "auth/weak-password") {
+        setAuthError("Password should be at least 6 characters.");
+      } else {
+        setAuthError("Registration failed.");
+      }
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   return (
@@ -59,7 +103,6 @@ export default function Auth() {
           <p className="text-gray-600 mt-2">Professional Help Desk System</p>
         </div>
 
-        {/* Auth Forms */}
         <Card className="shadow-xl">
           <CardHeader>
             <CardTitle className="text-center text-xl">Get Started</CardTitle>
@@ -70,7 +113,7 @@ export default function Auth() {
                 <TabsTrigger value="login">Sign In</TabsTrigger>
                 <TabsTrigger value="register">Sign Up</TabsTrigger>
               </TabsList>
-              
+
               {/* Login Tab */}
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">
@@ -80,13 +123,15 @@ export default function Auth() {
                       id="login-email"
                       type="email"
                       value={loginData.email}
-                      onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                      onChange={(e) =>
+                        setLoginData({ ...loginData, email: e.target.value })
+                      }
                       placeholder="your@email.com"
                       className="mt-1"
                       required
                     />
                   </div>
-                  
+
                   <div>
                     <Label htmlFor="login-password">Password</Label>
                     <div className="relative mt-1">
@@ -94,7 +139,9 @@ export default function Auth() {
                         id="login-password"
                         type={showPassword ? "text" : "password"}
                         value={loginData.password}
-                        onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                        onChange={(e) =>
+                          setLoginData({ ...loginData, password: e.target.value })
+                        }
                         placeholder="Enter your password"
                         className="pr-12"
                         required
@@ -104,20 +151,24 @@ export default function Auth() {
                         onClick={() => setShowPassword(!showPassword)}
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                       >
-                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                        {showPassword ? (
+                          <EyeOff className="w-5 h-5" />
+                        ) : (
+                          <Eye className="w-5 h-5" />
+                        )}
                       </button>
                     </div>
                   </div>
 
-                  <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-                    Sign In
+                  {authError && <p className="text-sm text-red-600">{authError}</p>}
+
+                  <Button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    {authLoading ? "Signing In..." : "Sign In"}
                   </Button>
-                  
-                  <div className="text-center">
-                    <Button variant="link" className="text-sm text-blue-600">
-                      Forgot password?
-                    </Button>
-                  </div>
                 </form>
               </TabsContent>
 
@@ -130,7 +181,12 @@ export default function Auth() {
                       <Input
                         id="firstName"
                         value={registerData.firstName}
-                        onChange={(e) => setRegisterData({ ...registerData, firstName: e.target.value })}
+                        onChange={(e) =>
+                          setRegisterData({
+                            ...registerData,
+                            firstName: e.target.value,
+                          })
+                        }
                         placeholder="John"
                         className="mt-1"
                         required
@@ -141,7 +197,12 @@ export default function Auth() {
                       <Input
                         id="lastName"
                         value={registerData.lastName}
-                        onChange={(e) => setRegisterData({ ...registerData, lastName: e.target.value })}
+                        onChange={(e) =>
+                          setRegisterData({
+                            ...registerData,
+                            lastName: e.target.value,
+                          })
+                        }
                         placeholder="Doe"
                         className="mt-1"
                         required
@@ -155,7 +216,12 @@ export default function Auth() {
                       id="register-email"
                       type="email"
                       value={registerData.email}
-                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
+                      onChange={(e) =>
+                        setRegisterData({
+                          ...registerData,
+                          email: e.target.value,
+                        })
+                      }
                       placeholder="your@email.com"
                       className="mt-1"
                       required
@@ -164,9 +230,11 @@ export default function Auth() {
 
                   <div>
                     <Label htmlFor="role">Account Type</Label>
-                    <Select 
-                      value={registerData.role} 
-                      onValueChange={(value) => setRegisterData({ ...registerData, role: value })}
+                    <Select
+                      value={registerData.role}
+                      onValueChange={(value) =>
+                        setRegisterData({ ...registerData, role: value })
+                      }
                     >
                       <SelectTrigger className="mt-1">
                         <SelectValue placeholder="Select account type" />
@@ -185,7 +253,12 @@ export default function Auth() {
                       id="register-password"
                       type="password"
                       value={registerData.password}
-                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
+                      onChange={(e) =>
+                        setRegisterData({
+                          ...registerData,
+                          password: e.target.value,
+                        })
+                      }
                       placeholder="Create a password"
                       className="mt-1"
                       required
@@ -198,15 +271,26 @@ export default function Auth() {
                       id="confirm-password"
                       type="password"
                       value={registerData.confirmPassword}
-                      onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
+                      onChange={(e) =>
+                        setRegisterData({
+                          ...registerData,
+                          confirmPassword: e.target.value,
+                        })
+                      }
                       placeholder="Confirm your password"
                       className="mt-1"
                       required
                     />
                   </div>
 
-                  <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-                    Create Account
+                  {authError && <p className="text-sm text-red-600">{authError}</p>}
+
+                  <Button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    {authLoading ? "Creating..." : "Create Account"}
                   </Button>
                 </form>
               </TabsContent>
@@ -214,7 +298,6 @@ export default function Auth() {
           </CardContent>
         </Card>
 
-        {/* Demo Credentials */}
         <div className="mt-6 p-4 bg-white rounded-lg shadow text-center">
           <p className="text-sm text-gray-600 mb-2">Demo Credentials:</p>
           <div className="text-xs text-gray-500 space-y-1">

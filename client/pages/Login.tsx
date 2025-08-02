@@ -1,27 +1,50 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "@/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MessageSquare, Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
+  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    username: "",
-    password: "",
-  });
+  const [formData, setFormData] = useState({ username: "", password: "" });
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Handle login logic here
-    console.log("Login attempt:", formData);
+    setError(null);
+
+    const { username, password } = formData;
+
+    if (!username || !password) {
+      setError("All fields are required");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, username, password);
+      navigate("/dashboard");
+    } catch (err: any) {
+      if (err.code === "auth/user-not-found") {
+        setError("No user found with this email.");
+      } else if (err.code === "auth/wrong-password") {
+        setError("Incorrect password.");
+      } else {
+        setError("Authentication failed. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-blue-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-500 rounded-2xl mb-4">
             <MessageSquare className="w-8 h-8 text-white" />
@@ -30,35 +53,30 @@ export default function Login() {
           <p className="text-gray-600 mt-2">Sign in to your QAHub account</p>
         </div>
 
-        {/* Login Form */}
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <Label htmlFor="username" className="text-sm font-medium text-gray-700">
-                Username
-              </Label>
+              <Label htmlFor="username">Email</Label>
               <Input
                 id="username"
-                type="text"
+                type="email"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                className="mt-1 w-full h-12 border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                placeholder="Enter your username"
+                className="mt-1"
+                placeholder="Enter your email"
                 required
               />
             </div>
 
             <div>
-              <Label htmlFor="password" className="text-sm font-medium text-gray-700">
-                Password
-              </Label>
+              <Label htmlFor="password">Password</Label>
               <div className="relative mt-1">
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full h-12 pr-12 border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  className="pr-12"
                   placeholder="Enter your password"
                   required
                 />
@@ -67,20 +85,19 @@ export default function Login() {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
-                  {showPassword ? (
-                    <EyeOff className="w-5 h-5" />
-                  ) : (
-                    <Eye className="w-5 h-5" />
-                  )}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
 
+            {error && <p className="text-sm text-red-600">{error}</p>}
+
             <Button
               type="submit"
-              className="w-full h-12 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-lg transition-colors"
+              disabled={loading}
+              className="w-full h-12 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-lg"
             >
-              Sign In
+              {loading ? "Signing In..." : "Sign In"}
             </Button>
           </form>
 
