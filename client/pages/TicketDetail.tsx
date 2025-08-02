@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { HelpDeskLayout } from "@/components/HelpDeskLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,15 +19,36 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
-  Edit2
+  Edit2,
+  ArrowLeft
 } from "lucide-react";
+import { auth, db } from "@/firebase";
+import { doc, getDoc, collection, query, where, getDocs, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+
+interface Ticket {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  category: string;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  assignedTo?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  tags: string[];
+}
 
 interface TicketMessage {
   id: string;
   author: string;
-  authorRole: "customer" | "agent" | "system";
+  authorId: string;
+  authorRole: "customer" | "agent" | "admin" | "system";
   content: string;
-  timestamp: string;
+  timestamp: Date;
   attachments?: Array<{
     id: string;
     name: string;
@@ -36,60 +57,6 @@ interface TicketMessage {
   }>;
   isInternal?: boolean;
 }
-
-const mockTicket = {
-  id: "TD-001",
-  title: "Unable to login to account",
-  description: "User cannot access their account after password reset. Tried multiple times with the new password but keeps getting 'Invalid credentials' error.",
-  status: "open",
-  priority: "high",
-  category: "Account Issues",
-  customer: "John Smith",
-  customerEmail: "john.smith@example.com",
-  assignedTo: "Sarah Wilson",
-  created: "2024-01-15T10:30:00Z",
-  updated: "2024-01-15T14:20:00Z",
-  tags: ["login", "password", "urgent"]
-};
-
-const mockMessages: TicketMessage[] = [
-  {
-    id: "1",
-    author: "John Smith",
-    authorRole: "customer",
-    content: "I reset my password this morning but I'm still unable to login. The error message says 'Invalid credentials' even though I'm using the new password that was sent to my email.",
-    timestamp: "2024-01-15T10:30:00Z"
-  },
-  {
-    id: "2",
-    author: "Sarah Wilson",
-    authorRole: "agent",
-    content: "Hi John, I'm sorry to hear you're having trouble logging in. Let me check your account status and see what might be causing this issue. Can you please confirm the email address you're using to log in?",
-    timestamp: "2024-01-15T11:15:00Z"
-  },
-  {
-    id: "3",
-    author: "John Smith",
-    authorRole: "customer",
-    content: "Yes, I'm using john.smith@example.com - the same email address I've always used.",
-    timestamp: "2024-01-15T11:45:00Z"
-  },
-  {
-    id: "4",
-    author: "Sarah Wilson",
-    authorRole: "agent",
-    content: "I can see that your password was successfully reset, but there might be a caching issue. Please try clearing your browser cache and cookies, then attempt to log in again. If that doesn't work, please try using an incognito/private browsing window.",
-    timestamp: "2024-01-15T12:20:00Z",
-    isInternal: false
-  },
-  {
-    id: "5",
-    author: "System",
-    authorRole: "system",
-    content: "Status changed from 'New' to 'In Progress' by Sarah Wilson",
-    timestamp: "2024-01-15T12:21:00Z"
-  }
-];
 
 const getStatusColor = (status: string) => {
   switch (status) {
@@ -124,6 +91,7 @@ const getRoleColor = (role: string) => {
   switch (role) {
     case "customer": return "bg-blue-100 text-blue-800";
     case "agent": return "bg-green-100 text-green-800";
+    case "admin": return "bg-purple-100 text-purple-800";
     case "system": return "bg-gray-100 text-gray-800";
     default: return "bg-gray-100 text-gray-800";
   }
@@ -131,57 +99,160 @@ const getRoleColor = (role: string) => {
 
 export default function TicketDetail() {
   const { id } = useParams();
-  const [userRole, setUserRole] = useState<"end_user" | "support_agent" | "admin">("end_user");
-  const [ticket, setTicket] = useState(mockTicket);
-  const [messages, setMessages] = useState(mockMessages);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isInternal, setIsInternal] = useState(false);
-  const [newStatus, setNewStatus] = useState(ticket.status);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const user = localStorage.getItem("user");
-    if (user) {
-      const userData = JSON.parse(user);
-      setUserRole(userData.role || "end_user");
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+
+      try {
+        // Get current user data
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (!userDoc.exists()) {
+          throw new Error("User not found");
+        }
+        
+        const userData = userDoc.data();
+        setCurrentUser({
+          id: user.uid,
+          ...userData
+        });
+
+        // Get ticket data
+        const ticketDoc = await getDoc(doc(db, "tickets", id!));
+        if (!ticketDoc.exists()) {
+          throw new Error("Ticket not found");
+        }
+
+        const ticketData = ticketDoc.data();
+        
+        // Check permissions
+        if (userData.role === "customer" && ticketData.customerId !== user.uid) {
+          throw new Error("You don't have permission to view this ticket");
+        }
+
+        setTicket({
+          id: ticketDoc.id,
+          ...ticketData,
+          createdAt: ticketData.createdAt.toDate(),
+          updatedAt: ticketData.updatedAt.toDate()
+        } as Ticket);
+
+        // Get messages
+        const messagesQuery = query(
+          collection(db, "tickets", id!, "messages"),
+          where("isInternal", "in", userData.role === "customer" ? [false, null] : [true, false, null])
+        );
+        
+        const messagesSnapshot = await getDocs(messagesQuery);
+        const messagesData = messagesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          timestamp: doc.data().timestamp.toDate()
+        })) as TicketMessage[];
+
+        setMessages(messagesData);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "An error occurred");
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [id]);
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !ticket || !currentUser) return;
+
+    try {
+      const messageData = {
+        author: currentUser.name || currentUser.email,
+        authorId: currentUser.id,
+        authorRole: currentUser.role === "customer" ? "customer" : 
+                    currentUser.role === "admin" ? "admin" : "agent",
+        content: newMessage,
+        timestamp: serverTimestamp(),
+        isInternal: isInternal && currentUser.role !== "customer"
+      };
+
+      // Add message to Firestore
+      const messageRef = await addDoc(
+        collection(db, "tickets", ticket.id, "messages"),
+        messageData
+      );
+
+      // Update local state
+      const newMessageObj: TicketMessage = {
+        id: messageRef.id,
+        ...messageData,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, newMessageObj]);
+      setNewMessage("");
+      setIsInternal(false);
+
+      // Update ticket's last updated time
+      await updateDoc(doc(db, "tickets", ticket.id), {
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Error sending message:", err);
+      setError("Failed to send message");
     }
-  }, []);
-
-  const handleSendMessage = () => {
-    if (!newMessage.trim()) return;
-
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
-    const message: TicketMessage = {
-      id: Date.now().toString(),
-      author: user.name || "Anonymous",
-      authorRole: userRole === "end_user" ? "customer" : "agent",
-      content: newMessage,
-      timestamp: new Date().toISOString(),
-      isInternal: isInternal && userRole !== "end_user"
-    };
-
-    setMessages(prev => [...prev, message]);
-    setNewMessage("");
-    setIsInternal(false);
   };
 
-  const handleStatusChange = (status: string) => {
-    setNewStatus(status);
-    setTicket(prev => ({ ...prev, status }));
-    
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
-    const systemMessage: TicketMessage = {
-      id: Date.now().toString(),
-      author: "System",
-      authorRole: "system",
-      content: `Status changed from '${ticket.status}' to '${status}' by ${user.name}`,
-      timestamp: new Date().toISOString()
-    };
+  const handleStatusChange = async (status: string) => {
+    if (!ticket || !currentUser) return;
 
-    setMessages(prev => [...prev, systemMessage]);
+    try {
+      // Update ticket status in Firestore
+      await updateDoc(doc(db, "tickets", ticket.id), {
+        status,
+        updatedAt: serverTimestamp()
+      });
+
+      // Update local state
+      setTicket(prev => prev ? { ...prev, status, updatedAt: new Date() } : null);
+
+      // Add system message
+      const systemMessage = {
+        author: "System",
+        authorId: "system",
+        authorRole: "system",
+        content: `Status changed from '${ticket.status}' to '${status}' by ${currentUser.name || currentUser.email}`,
+        timestamp: serverTimestamp(),
+        isInternal: false
+      };
+
+      const messageRef = await addDoc(
+        collection(db, "tickets", ticket.id, "messages"),
+        systemMessage
+      );
+
+      // Update local messages
+      setMessages(prev => [
+        ...prev,
+        {
+          id: messageRef.id,
+          ...systemMessage,
+          timestamp: new Date()
+        }
+      ]);
+    } catch (err) {
+      console.error("Error updating status:", err);
+      setError("Failed to update ticket status");
+    }
   };
 
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
+  const formatTimestamp = (date: Date) => {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -195,9 +266,73 @@ export default function TicketDetail() {
     return date.toLocaleDateString();
   };
 
-  return (
-    <HelpDeskLayout userRole={userRole}>
-      <div className="max-w-6xl mx-auto space-y-6">
+  if (loading) {
+    return (
+      <HelpDeskLayout userRole={currentUser?.role || "user"}>
+        <div className="max-w-6xl mx-auto p-4">
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          </div>
+        </div>
+      </HelpDeskLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <HelpDeskLayout userRole={currentUser?.role || "user"}>
+        <div className="max-w-6xl mx-auto p-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h2 className="text-lg font-medium text-red-800">Error</h2>
+            <p className="text-red-600">{error}</p>
+            <Button 
+              variant="outline" 
+              className="mt-4" 
+              onClick={() => navigate(-1)}
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Go Back
+            </Button>
+          </div>
+        </div>
+      </HelpDeskLayout>
+    );
+  }
+
+  if (!ticket) {
+    return (
+      <HelpDeskLayout userRole={currentUser?.role || "user"}>
+        <div className="max-w-6xl mx-auto p-4">
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h2 className="text-lg font-medium text-gray-800">Ticket not found</h2>
+            <p className="text-gray-600">The requested ticket could not be found.</p>
+            <Button 
+              variant="outline" 
+              className="mt-4" 
+              onClick={() => navigate(-1)}
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Go Back
+            </Button>
+          </div>
+        </div>
+      </HelpDeskLayout>
+    );
+  }
+
+    return (
+    <HelpDeskLayout userRole={currentUser?.role || "user"}>
+      <div className="max-w-6xl mx-auto space-y-6 p-4">
+        {/* Back button */}
+        <Button 
+          variant="outline" 
+          onClick={() => navigate(-1)}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to Tickets
+        </Button>
+
         {/* Ticket Header */}
         <Card>
           <CardContent className="pt-6">
@@ -225,7 +360,7 @@ export default function TicketDetail() {
                     <User className="w-4 h-4 mr-2" />
                     <div>
                       <p className="font-medium">Customer</p>
-                      <p>{ticket.customer}</p>
+                      <p>{ticket.customerName}</p>
                     </div>
                   </div>
                   <div className="flex items-center">
@@ -239,14 +374,14 @@ export default function TicketDetail() {
                     <Calendar className="w-4 h-4 mr-2" />
                     <div>
                       <p className="font-medium">Created</p>
-                      <p>{new Date(ticket.created).toLocaleDateString()}</p>
+                      <p>{ticket.createdAt.toLocaleDateString()}</p>
                     </div>
                   </div>
                   <div className="flex items-center">
                     <Clock className="w-4 h-4 mr-2" />
                     <div>
                       <p className="font-medium">Last Updated</p>
-                      <p>{new Date(ticket.updated).toLocaleDateString()}</p>
+                      <p>{ticket.updatedAt.toLocaleDateString()}</p>
                     </div>
                   </div>
                 </div>
@@ -261,10 +396,10 @@ export default function TicketDetail() {
                 </div>
               </div>
 
-              {/* Actions */}
-              {(userRole === "support_agent" || userRole === "admin") && (
+              {/* Actions - Only for agents and admins */}
+              {(currentUser?.role === "agent" || currentUser?.role === "admin") && (
                 <div className="flex flex-col space-y-2 ml-6">
-                  <Select value={newStatus} onValueChange={handleStatusChange}>
+                  <Select value={ticket.status} onValueChange={handleStatusChange}>
                     <SelectTrigger className="w-40">
                       <SelectValue />
                     </SelectTrigger>
@@ -355,47 +490,51 @@ export default function TicketDetail() {
           </CardContent>
         </Card>
 
-        {/* Reply Section */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Add Reply</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <Textarea
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Type your message here..."
-                className="min-h-[100px]"
-              />
-              
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  {(userRole === "support_agent" || userRole === "admin") && (
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={isInternal}
-                        onChange={(e) => setIsInternal(e.target.checked)}
-                        className="rounded"
-                      />
-                      <span className="text-sm text-gray-600">Internal note (not visible to customer)</span>
-                    </label>
-                  )}
-                </div>
+        {/* Reply Section - Only visible if user can reply */}
+        {(currentUser?.role === "user" || 
+          currentUser?.role === "agent" || 
+          currentUser?.role === "admin") && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Add Reply</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <Textarea
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Type your message here..."
+                  className="min-h-[100px]"
+                />
                 
-                <Button 
-                  onClick={handleSendMessage}
-                  disabled={!newMessage.trim()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <Send className="w-4 h-4 mr-2" />
-                  Send Reply
-                </Button>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    {(currentUser?.role === "agent" || currentUser?.role === "admin") && (
+                      <label className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          checked={isInternal}
+                          onChange={(e) => setIsInternal(e.target.checked)}
+                          className="rounded"
+                        />
+                        <span className="text-sm text-gray-600">Internal note (not visible to customer)</span>
+                      </label>
+                    )}
+                  </div>
+                  
+                  <Button 
+                    onClick={handleSendMessage}
+                    disabled={!newMessage.trim()}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    <Send className="w-4 h-4 mr-2" />
+                    Send Reply
+                  </Button>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </HelpDeskLayout>
   );

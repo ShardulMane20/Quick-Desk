@@ -19,13 +19,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { db, auth } from "../firebase.ts";
+import { collection, query, orderBy, where, onSnapshot, doc, getDoc } from "firebase/firestore";
+import { db, auth } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { debounce } from "lodash"; // Ensure lodash is installed: npm install lodash
+import { debounce } from "lodash";
 
 const TicketManager = () => {
   const [userRole, setUserRole] = useState("end_user");
+  const [userId, setUserId] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [tickets, setTickets] = useState([]);
   const [filteredTickets, setFilteredTickets] = useState([]);
@@ -35,18 +36,36 @@ const TicketManager = () => {
     priority: "all",
     category: "all",
     assignee: "all",
-    sortBy: "createdAt",
+    sortBy: "priority", // Changed from createdAt to priority
     sortOrder: "desc",
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Memoize applyFilters to prevent recreating the debounced function
+  const handleSortChange = (sortBy) => {
+    setFilters((prev) => ({
+      ...prev,
+      sortBy,
+      sortOrder: prev.sortBy === sortBy && prev.sortOrder === "desc" ? "asc" : "desc",
+    }));
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      search: "",
+      status: "all",
+      priority: "all",
+      category: "all",
+      assignee: "all",
+      sortBy: "priority", // Changed from createdAt to priority
+      sortOrder: "desc",
+    });
+  };
+
   const applyFilters = useCallback(
     debounce((tickets) => {
       let filtered = [...tickets];
 
-      // Safe checks for ticket properties
       if (filters.search) {
         filtered = filtered.filter(
           (ticket) =>
@@ -68,74 +87,88 @@ const TicketManager = () => {
         filtered = filtered.filter((ticket) => ticket.category === filters.category);
       }
 
-      if (filters.assignee !== "all") {
+      if (filters.assignee !== "all" && (userRole === "support_agent" || userRole === "admin")) {
         if (filters.assignee === "unassigned") {
-          filtered = filtered.filter((ticket) => !ticket.assigneeEmail);
+          filtered = filtered.filter((ticket) => !ticket.assigneeId);
         } else {
-          filtered = filtered.filter((ticket) => ticket.assigneeEmail === filters.assignee);
+          filtered = filtered.filter((ticket) => ticket.assigneeId === filters.assignee);
         }
       }
 
       if (userRole === "end_user") {
-        filtered = filtered.filter((ticket) => ticket.userEmail === userEmail);
+        filtered = filtered.filter((ticket) => ticket.userId === userId);
       }
+
+      // Sort by priority
+      filtered.sort((a, b) => {
+        const priorityOrder = { high: 3, medium: 2, low: 1 };
+        const aPriority = priorityOrder[a.priority] || 0;
+        const bPriority = priorityOrder[b.priority] || 0;
+        return filters.sortOrder === "desc" ? bPriority - aPriority : aPriority - bPriority;
+      });
 
       setFilteredTickets(filtered);
     }, 300),
-    [filters, userRole, userEmail]
+    [filters, userRole, userId]
   );
 
-  // Fetch tickets in real-time
   useEffect(() => {
     let q;
     try {
-      q = query(collection(db, "tickets"), orderBy(filters.sortBy, filters.sortOrder));
-    } catch (err) {
-      console.error("Invalid query:", err);
-      setError("Invalid sort configuration. Please try again.");
-      setLoading(false);
-      return;
-    }
+      const baseQuery = collection(db, "tickets");
 
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const ticketsData = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setTickets(ticketsData);
-        setFilteredTickets(ticketsData);
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Error fetching tickets:", error);
-        if (error.code === "permission-denied") {
-          setError("You don't have permission to view tickets. Please contact support.");
-        } else {
-          setError("Failed to load tickets: " + error.message);
-        }
-        setLoading(false);
+      if (userRole === "end_user") {
+        q = query(
+          baseQuery,
+          where("userId", "==", userId)
+        );
+      } else {
+        q = baseQuery;
       }
-    );
 
-    return () => unsubscribe();
-  }, [filters.sortBy, filters.sortOrder]);
+      const unsubscribe = onSnapshot(
+        q,
+        (querySnapshot) => {
+          const ticketsData = querySnapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+          setTickets(ticketsData);
+          setLoading(false);
+        },
+        (error) => {
+          console.error("Error fetching tickets:", error);
+          setError("Failed to load tickets: " + error.message);
+          setLoading(false);
+        }
+      );
 
-  // Handle authentication and fetch user role from Firestore
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("Query error:", err);
+      setError("Invalid query configuration");
+      setLoading(false);
+    }
+  }, [userRole, userId]);
+
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        setUserId(user.uid);
         setUserEmail(user.email);
-        // Fetch role from Firestore (assuming a 'users' collection with role field)
         try {
           const userDoc = await getDoc(doc(db, "users", user.uid));
-          setUserRole(userDoc.exists() ? userDoc.data().role : "end_user");
+          if (userDoc.exists()) {
+            setUserRole(userDoc.data().role || "end_user");
+          } else {
+            setUserRole("end_user");
+          }
         } catch (error) {
           console.error("Error fetching user role:", error);
           setUserRole("end_user");
         }
       } else {
+        setUserId("");
         setUserEmail("");
         setUserRole("end_user");
       }
@@ -143,74 +176,39 @@ const TicketManager = () => {
     return () => unsubscribeAuth();
   }, []);
 
-  // Apply filters when tickets or filters change
   useEffect(() => {
     applyFilters(tickets);
   }, [tickets, applyFilters]);
 
-  const clearFilters = () => {
-    setFilters({
-      search: "",
-      status: "all",
-      priority: "all",
-      category: "all",
-      assignee: "all",
-      sortBy: "createdAt",
-      sortOrder: "desc",
-    });
-  };
-
-  const handleSortChange = (sortBy) => {
-    setFilters((prev) => ({
-      ...prev,
-      sortBy,
-      sortOrder: prev.sortBy === sortBy && prev.sortOrder === "desc" ? "asc" : "desc",
-    }));
-  };
-
   const getStatusColor = (status) => {
     switch (status) {
-      case "open":
-        return "bg-red-100 text-red-800";
-      case "in_progress":
-        return "bg-yellow-100 text-yellow-800";
-      case "resolved":
-        return "bg-green-100 text-green-800";
-      case "closed":
-        return "bg-gray-100 text-gray-800";
-      default:
-        return "bg-gray-100 text-gray-800";
+      case "open": return "bg-red-100 text-red-800";
+      case "in_progress": return "bg-yellow-100 text-yellow-800";
+      case "resolved": return "bg-green-100 text-green-800";
+      case "closed": return "bg-gray-100 text-gray-800";
+      default: return "bg-gray-100 text-gray-800";
     }
   };
 
-const getPriorityColor = (priority) => {
-  switch (priority) {
-    case "high":
-      return "bg-red-100 text-red-800";
-    case "medium":
-      return "bg-yellow-100 text-yellow-800";
-    case "low":
-      return "bg-green-100 text-green-800";
-    default:
-      return "bg-gray-100 text-gray-800";
-  }
-};
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case "high": return "bg-red-100 text-red-800";
+      case "medium": return "bg-yellow-100 text-yellow-800";
+      case "low": return "bg-green-100 text-green-800";
+      default: return "bg-gray-100 text-gray-800";
+    }
+  };
+
   const getStatusIcon = (status) => {
     switch (status) {
-      case "open":
-        return <AlertCircle className="w-4 h-4" />;
-      case "in_progress":
-        return <Clock className="w-4 h-4" />;
-      case "resolved":
-        return <CheckCircle className="w-4 h-4" />;
-      case "closed":
-        return <XCircle className="w-4 h-4" />;
-      default:
-        return <AlertCircle className="w-4 h-4" />;
+      case "open": return <AlertCircle className="w-4 h-4" />;
+      case "in_progress": return <Clock className="w-4 h-4" />;
+      case "resolved": return <CheckCircle className="w-4 h-4" />;
+      case "closed": return <XCircle className="w-4 h-4" />;
+      default: return <AlertCircle className="w-4 h-4" />;
     }
   };
 
-  // Format date with IST, with fallback for non-Timestamp values
   const formatISTDate = (date) => {
     try {
       const dateObj = date?.toDate ? date.toDate() : new Date(date);
@@ -224,7 +222,6 @@ const getPriorityColor = (priority) => {
       return "Invalid Date";
     }
   };
-
   return (
     <HelpDeskLayout userRole={userRole}>
       <div className="space-y-6">
@@ -232,7 +229,7 @@ const getPriorityColor = (priority) => {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">
-              {userRole === "end_user" ? "My Tickets" : "All Tickets"}
+              {userRole === "end_user" ? "My Tickets" : "Ticket Management"}
             </h1>
             <p className="text-gray-600 mt-1">
               Showing {filteredTickets.length} of {tickets.length} tickets
@@ -275,6 +272,8 @@ const getPriorityColor = (priority) => {
                   />
                 </div>
               </div>
+              
+              {/* Status filter */}
               <Select
                 value={filters.status}
                 onValueChange={(value) => setFilters({ ...filters, status: value })}
@@ -290,6 +289,8 @@ const getPriorityColor = (priority) => {
                   <SelectItem value="closed">Closed</SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* Priority filter */}
               <Select
                 value={filters.priority}
                 onValueChange={(value) => setFilters({ ...filters, priority: value })}
@@ -304,6 +305,8 @@ const getPriorityColor = (priority) => {
                   <SelectItem value="low">Low</SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* Category filter */}
               <Select
                 value={filters.category}
                 onValueChange={(value) => setFilters({ ...filters, category: value })}
@@ -314,23 +317,30 @@ const getPriorityColor = (priority) => {
                 <SelectContent>
                   <SelectItem value="all">All Categories</SelectItem>
                   <SelectItem value="General Inquiry">General Inquiry</SelectItem>
-                  {/* Add more categories as needed */}
                 </SelectContent>
               </Select>
-              <Select
-                value={filters.assignee}
-                onValueChange={(value) => setFilters({ ...filters, assignee: value })}
+
+              {/* Assignee filter - only for agents and admins */}
+              {(userRole === "support_agent" || userRole === "admin") && (
+                <Select
+                  value={filters.assignee}
+                  onValueChange={(value) => setFilters({ ...filters, assignee: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Assignee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Assignees</SelectItem>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+
+              {/* Sort by */}
+              <Select 
+                value={filters.sortBy} 
+                onValueChange={handleSortChange}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Assignee" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Assignees</SelectItem>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {/* Dynamically populate assignees if possible */}
-                </SelectContent>
-              </Select>
-              <Select value={filters.sortBy} onValueChange={handleSortChange}>
                 <SelectTrigger>
                   <SelectValue placeholder="Sort By" />
                 </SelectTrigger>
@@ -340,6 +350,7 @@ const getPriorityColor = (priority) => {
                   <SelectItem value="priority">Priority</SelectItem>
                 </SelectContent>
               </Select>
+
               <Button variant="outline" onClick={clearFilters}>
                 Clear Filters
               </Button>
@@ -387,10 +398,12 @@ const getPriorityColor = (priority) => {
                           <User className="w-4 h-4 mr-1" />
                           Customer: {ticket.userEmail || "Unknown"}
                         </span>
-                        <span className="flex items-center">
-                          <User className="w-4 h-4 mr-1" />
-                          Assignee: {ticket.assigneeEmail || "Unassigned"}
-                        </span>
+                        {(userRole === "support_agent" || userRole === "admin") && (
+                          <span className="flex items-center">
+                            <User className="w-4 h-4 mr-1" />
+                            Assignee: {ticket.assigneeEmail || "Unassigned"}
+                          </span>
+                        )}
                         <span className="flex items-center">
                           <Calendar className="w-4 h-4 mr-1" />
                           Created: {formatISTDate(ticket.createdAt)}
@@ -440,7 +453,9 @@ const getPriorityColor = (priority) => {
               <p className="text-gray-600 mb-4">
                 {filters.search || filters.status !== "all" || filters.priority !== "all" || filters.category !== "all"
                   ? "Try adjusting your filters to see more tickets."
-                  : "Create your first ticket to get started."}
+                  : userRole === "end_user"
+                    ? "You haven't created any tickets yet."
+                    : "No tickets have been created yet."}
               </p>
               <Link to="/create-ticket">
                 <Button className="bg-blue-600 hover:bg-blue-700 text-white">

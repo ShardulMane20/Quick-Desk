@@ -5,7 +5,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc,getDoc } from "firebase/firestore";
+
 import {
   Card,
   CardContent,
@@ -41,26 +42,41 @@ export default function Auth() {
     confirmPassword: "",
   });
 
-  // LOGIN
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    setAuthLoading(true);
-    try {
-      await signInWithEmailAndPassword(auth, loginData.email, loginData.password);
+const handleLogin = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setAuthError(null);
+  setAuthLoading(true);
+
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, loginData.email, loginData.password);
+    const user = userCredential.user;
+
+    // 🔍 Fetch user role from Firestore
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    const role = userDoc.data()?.role || "end_user";
+
+    // 🌐 Store locally (optional)
+    localStorage.setItem("user", JSON.stringify({ uid: user.uid, email: user.email, role }));
+
+    // 🔁 Redirect based on role
+    if (role === "admin") {
+      navigate("/admin");
+    } else {
       navigate("/dashboard");
-    } catch (err: any) {
-      if (err.code === "auth/user-not-found") {
-        setAuthError("No user found with this email.");
-      } else if (err.code === "auth/wrong-password") {
-        setAuthError("Incorrect password.");
-      } else {
-        setAuthError("Login failed. Please try again.");
-      }
-    } finally {
-      setAuthLoading(false);
     }
-  };
+
+  } catch (err: any) {
+    if (err.code === "auth/user-not-found") {
+      setAuthError("No user found with this email.");
+    } else if (err.code === "auth/wrong-password") {
+      setAuthError("Incorrect password.");
+    } else {
+      setAuthError("Login failed. Please try again.");
+    }
+  } finally {
+    setAuthLoading(false);
+  }
+};
 
   // REGISTER
   const handleRegister = async (e: React.FormEvent) => {
