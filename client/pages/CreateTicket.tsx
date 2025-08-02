@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { HelpDeskLayout } from "@/components/HelpDeskLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,40 +8,42 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Upload, 
-  X, 
-  File, 
-  Image, 
-  Paperclip,
-  AlertCircle,
-  Send
-} from "lucide-react";
-
-interface UploadedFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  url?: string;
-}
+import { AlertCircle, Send, X } from "lucide-react";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { db, auth } from "@/firebase";
 
 export default function CreateTicket() {
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   
   const [formData, setFormData] = useState({
     subject: "",
     description: "",
     category: "",
     priority: "medium",
-    tags: [] as string[]
+    tags: [] as string[],
+    status: "open",
+    userId: ""
   });
   
   const [newTag, setNewTag] = useState("");
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [dragOver, setDragOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        setCurrentUser(user);
+        setFormData(prev => ({
+          ...prev,
+          userId: user.uid
+        }));
+      } else {
+        navigate('/login');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigate]);
 
   const categories = [
     "Technical Issues",
@@ -58,44 +60,6 @@ export default function CreateTicket() {
     { value: "medium", label: "Medium", color: "bg-yellow-100 text-yellow-800" },
     { value: "high", label: "High", color: "bg-red-100 text-red-800" }
   ];
-
-  const handleFileUpload = (files: FileList | null) => {
-    if (!files) return;
-
-    Array.from(files).forEach(file => {
-      // Check file size (10MB limit)
-      if (file.size > 10 * 1024 * 1024) {
-        alert(`File ${file.name} is too large. Maximum size is 10MB.`);
-        return;
-      }
-
-      const newFile: UploadedFile = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        url: URL.createObjectURL(file)
-      };
-
-      setUploadedFiles(prev => [...prev, newFile]);
-    });
-  };
-
-  const removeFile = (fileId: string) => {
-    setUploadedFiles(prev => {
-      const file = prev.find(f => f.id === fileId);
-      if (file?.url) {
-        URL.revokeObjectURL(file.url);
-      }
-      return prev.filter(f => f.id !== fileId);
-    });
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    handleFileUpload(e.dataTransfer.files);
-  };
 
   const addTag = () => {
     if (newTag.trim() && !formData.tags.includes(newTag.trim().toLowerCase())) {
@@ -114,22 +78,15 @@ export default function CreateTicket() {
     }));
   };
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const getFileIcon = (type: string) => {
-    if (type.startsWith('image/')) return <Image className="w-4 h-4" />;
-    return <File className="w-4 h-4" />;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!currentUser) {
+      alert("You must be logged in to create a ticket");
+      navigate('/login');
+      return;
+    }
+
     if (!formData.subject.trim() || !formData.description.trim() || !formData.category) {
       alert("Please fill in all required fields.");
       return;
@@ -138,27 +95,33 @@ export default function CreateTicket() {
     setIsSubmitting(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Generate ticket ID
-      const ticketId = `TD-${String(Date.now()).slice(-6)}`;
-      
-      console.log("Creating ticket:", {
+      const docRef = await addDoc(collection(db, "tickets"), {
         ...formData,
-        files: uploadedFiles,
-        ticketId
+        userId: currentUser.uid,
+        userEmail: currentUser.email,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
-
-      // Redirect to ticket view
-      navigate(`/ticket/${ticketId}`);
+      
+      alert(`Ticket created successfully! ID: ${docRef.id}`);
+      navigate(`/ticket/${docRef.id}`);
     } catch (error) {
       console.error("Error creating ticket:", error);
-      alert("Error creating ticket. Please try again.");
+      alert(`Error creating ticket: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (!currentUser) {
+    return (
+      <HelpDeskLayout>
+        <div className="max-w-4xl mx-auto p-6">
+          <p>Loading user information...</p>
+        </div>
+      </HelpDeskLayout>
+    );
+  }
 
   return (
     <HelpDeskLayout>
@@ -166,7 +129,9 @@ export default function CreateTicket() {
         {/* Header */}
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Create New Ticket</h1>
-          <p className="text-gray-600 mt-1">Describe your issue and we'll help you resolve it quickly.</p>
+          <p className="text-gray-600 mt-1">
+            Logged in as: {currentUser.email}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -193,7 +158,11 @@ export default function CreateTicket() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="category">Category *</Label>
-                  <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
+                  <Select 
+                    value={formData.category} 
+                    onValueChange={(value) => setFormData({ ...formData, category: value })}
+                    required
+                  >
                     <SelectTrigger className="mt-1">
                       <SelectValue placeholder="Select a category" />
                     </SelectTrigger>
@@ -207,7 +176,10 @@ export default function CreateTicket() {
 
                 <div>
                   <Label htmlFor="priority">Priority</Label>
-                  <Select value={formData.priority} onValueChange={(value) => setFormData({ ...formData, priority: value })}>
+                  <Select 
+                    value={formData.priority} 
+                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                  >
                     <SelectTrigger className="mt-1">
                       <SelectValue />
                     </SelectTrigger>
@@ -269,78 +241,6 @@ export default function CreateTicket() {
                   )}
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* File Upload */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Paperclip className="w-5 h-5 mr-2" />
-                Attachments
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Upload Area */}
-              <div
-                className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-                  dragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                }`}
-                onDrop={handleDrop}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-              >
-                <Upload className="w-10 h-10 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-2">
-                  Drag and drop files here, or{" "}
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-blue-600 hover:text-blue-700 font-medium"
-                  >
-                    browse
-                  </button>
-                </p>
-                <p className="text-sm text-gray-500">Maximum file size: 10MB per file</p>
-                
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => handleFileUpload(e.target.files)}
-                  accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.txt,.zip"
-                />
-              </div>
-
-              {/* Uploaded Files */}
-              {uploadedFiles.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <Label>Uploaded Files ({uploadedFiles.length})</Label>
-                  <div className="space-y-2">
-                    {uploadedFiles.map(file => (
-                      <div key={file.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center space-x-3">
-                          {getFileIcon(file.type)}
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                            <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeFile(file.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
 
