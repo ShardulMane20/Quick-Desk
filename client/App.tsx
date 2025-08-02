@@ -6,10 +6,12 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Login from "@/pages/Login";
-import Dashboard from "@/pages/Dashboard";
-import NotFound from "@/pages/NotFound";
-import HelpDeskDashboard from "@/pages/HelpDeskDashboard";
+import Auth from "./pages/Auth";
+import HelpDeskDashboard from "./pages/HelpDeskDashboard";
+import TicketManager from "./pages/TicketManager";
+import CreateTicket from "./pages/CreateTicket";
+import TicketDetail from "./pages/TicketDetail";
+import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
@@ -20,11 +22,15 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Login/>} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/notfound" element= {<NotFound/>}/>
-          <Route path="/HelpDeskDashboard" element={<HelpDeskDashboard/>}/>
-
+          <Route path="/" element={<Auth />} />
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/dashboard" element={<HelpDeskDashboard />} />
+          <Route path="/tickets" element={<TicketManager />} />
+          <Route path="/my-tickets" element={<TicketManager />} />
+          <Route path="/create-ticket" element={<CreateTicket />} />
+          <Route path="/ticket/:id" element={<TicketDetail />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
