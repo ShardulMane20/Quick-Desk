@@ -13,6 +13,7 @@ import TicketManager from "./pages/TicketManager";
 import CreateTicket from "./pages/CreateTicket";
 import TicketDetail from "./pages/TicketDetail";
 import NotFound from "./pages/NotFound";
+import Dashboard from "./pages/Dashboard";
 
 const queryClient = new QueryClient();
 
@@ -27,7 +28,7 @@ const App = () => (
            <Route path="/login" element={<Login />} />
 
           <Route path="/auth" element={<Auth />} />
-          <Route path="/dashboard" element={<HelpDeskDashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/tickets" element={<TicketManager />} />
           <Route path="/my-tickets" element={<TicketManager />} />
           <Route path="/create-ticket" element={<CreateTicket />} />

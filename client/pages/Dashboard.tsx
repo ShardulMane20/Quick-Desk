@@ -1,43 +1,157 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { auth, db } from "@/firebase";
+import { signOut, onAuthStateChanged } from "firebase/auth";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+  Timestamp,
+} from "firebase/firestore";
 import { Layout } from "@/components/Layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  MessageSquare, 
-  Users, 
-  TrendingUp, 
-  Award, 
+import {
+  MessageSquare,
+  Users,
+  TrendingUp,
+  Award,
   Plus,
   ArrowUp,
   ArrowDown,
-  Eye
+  Eye,
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Area, AreaChart } from 'recharts';
+import {
+  AreaChart,
+  Area,
+  CartesianGrid,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from "recharts";
 
-const weeklyData = [
-  { day: 'Mon', questions: 12, answers: 28 },
-  { day: 'Tue', questions: 19, answers: 35 },
-  { day: 'Wed', questions: 15, answers: 42 },
-  { day: 'Thu', questions: 22, answers: 38 },
-  { day: 'Fri', questions: 18, answers: 45 },
-  { day: 'Sat', questions: 8, answers: 22 },
-  { day: 'Sun', questions: 6, answers: 18 },
-];
+interface UserProfile {
+  firstName: string;
+  lastName: string;
+  role: string;
+}
 
-const topContributors = [
-  { name: "Alex Chen", answers: 42, reputation: 1250, trend: "up" },
-  { name: "Sarah Kumar", answers: 38, reputation: 1180, trend: "up" },
-  { name: "Mike Johnson", answers: 35, reputation: 950, trend: "down" },
-  { name: "Lisa Zhang", answers: 32, reputation: 890, trend: "up" },
-  { name: "David Smith", answers: 28, reputation: 720, trend: "up" },
-];
+interface Question {
+  createdAt: Timestamp;
+  views: number;
+  answersCount: number;
+  votes: number;
+  title: string;
+}
 
-const recentQuestions = [
-  { title: "How to optimize React component rendering?", views: 156, answers: 3, votes: 12 },
-  { title: "Best practices for TypeScript interfaces", views: 89, answers: 2, votes: 8 },
-  { title: "Debugging Node.js memory leaks", views: 234, answers: 5, votes: 15 },
-];
+interface Contributor {
+  name: string;
+  answersCount: number;
+  reputation: number;
+}
 
 export default function Dashboard() {
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [stats, setStats] = useState({ total: 0, answered: 0 });
+  const [weeklyData, setWeeklyData] = useState<any[]>([]);
+  const [topContributors, setTopContributors] = useState<Contributor[]>([]);
+  const [recentQuestions, setRecentQuestions] = useState<Question[]>([]);
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate("/");
+    } catch (err) {
+      console.error("Logout failed", err);
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const docSnap = await getDoc(doc(db, "users", user.uid));
+        if (docSnap.exists()) {
+          setUserProfile(docSnap.data() as UserProfile);
+        }
+      } else {
+        navigate("/"); // Redirect to login if no user
+      }
+    });
+
+    (async () => {
+      const allQ = await getDocs(collection(db, "questions"));
+      const answeredQ = await getDocs(
+        query(collection(db, "questions"), where("answersCount", ">", 0))
+      );
+      setStats({ total: allQ.size, answered: answeredQ.size });
+    })();
+
+    const unsubscribeQ = onSnapshot(collection(db, "questions"), (snap) => {
+      const data = snap.docs.map((doc) => doc.data() as Question);
+      const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const counts: Record<string, { questions: number; answers: number }> =
+        {};
+      data.forEach((q) => {
+        const date = q.createdAt.toDate();
+        const day = weekdays[date.getDay()];
+        counts[day] = counts[day] || { questions: 0, answers: 0 };
+        counts[day].questions++;
+        counts[day].answers += q.answersCount || 0;
+      });
+      setWeeklyData(
+        Object.entries(counts).map(([day, { questions, answers }]) => ({
+          day,
+          questions,
+          answers,
+        }))
+      );
+    });
+
+    (async () => {
+      const q = query(
+        collection(db, "users"),
+        orderBy("reputation", "desc"),
+        limit(5)
+      );
+      const snap = await getDocs(q);
+      setTopContributors(
+        snap.docs.map((d) => ({
+          name: `${d.data().firstName} ${d.data().lastName}`,
+          answersCount: d.data().answersCount || 0,
+          reputation: d.data().reputation || 0,
+        }))
+      );
+    })();
+
+    const recentQ = query(
+      collection(db, "questions"),
+      orderBy("createdAt", "desc"),
+      limit(5)
+    );
+    const unsubscribeRecent = onSnapshot(recentQ, (snap) => {
+      setRecentQuestions(snap.docs.map((d) => d.data() as Question));
+    });
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeQ();
+      unsubscribeRecent();
+    };
+  }, [navigate]);
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -45,174 +159,131 @@ export default function Dashboard() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-            <p className="text-gray-600 mt-1">Welcome back! Here's what's happening in your community.</p>
+            <p className="text-gray-600 mt-1">
+              Welcome {userProfile?.firstName}! Role: {userProfile?.role}
+            </p>
           </div>
-          <Button className="bg-emerald-500 hover:bg-emerald-600 text-white">
-            <Plus className="w-4 h-4 mr-2" />
-            Ask Question
-          </Button>
+          <div className="flex gap-2">
+            <Button className="bg-emerald-500 hover:bg-emerald-600 text-white">
+              <Plus className="w-4 h-4 mr-2" />
+              Ask Question
+            </Button>
+            <Button
+              variant="outline"
+              className="border border-red-500 text-red-600"
+              onClick={handleLogout}
+            >
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Questions</CardTitle>
-              <MessageSquare className="h-4 w-4 text-emerald-500" />
+            <CardHeader>
+              <CardTitle>Total Questions</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900">2,847</div>
-              <p className="text-xs text-emerald-600 mt-1">
-                <TrendingUp className="w-3 h-3 inline mr-1" />
-                +12% from last month
-              </p>
+              <div className="text-2xl font-bold text-gray-900">
+                {stats.total}
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Active Users</CardTitle>
-              <Users className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-900">1,294</div>
-              <p className="text-xs text-green-600 mt-1">
-                <TrendingUp className="w-3 h-3 inline mr-1" />
-                +8% from last month
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Answered Questions</CardTitle>
-              <Award className="h-4 w-4 text-yellow-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-900">2,156</div>
-              <p className="text-xs text-green-600 mt-1">
-                <TrendingUp className="w-3 h-3 inline mr-1" />
-                76% answer rate
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Avg Response Time</CardTitle>
-              <TrendingUp className="h-4 w-4 text-purple-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-900">2.4h</div>
-              <p className="text-xs text-green-600 mt-1">
-                <TrendingUp className="w-3 h-3 inline mr-1" />
-                15min faster
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Charts and Lists Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Weekly Activity Chart */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg font-semibold text-gray-900">Weekly Activity</CardTitle>
+              <CardTitle>Answered Questions</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={weeklyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="day" />
-                  <YAxis />
-                  <Tooltip />
-                  <Area 
-                    type="monotone" 
-                    dataKey="questions" 
-                    stackId="1"
-                    stroke="#10b981" 
-                    fill="#10b981" 
-                    fillOpacity={0.6}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="answers" 
-                    stackId="1"
-                    stroke="#3b82f6" 
-                    fill="#3b82f6" 
-                    fillOpacity={0.6}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* Top Contributors */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold text-gray-900">Top Contributors</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {topContributors.map((contributor, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
-                        <span className="text-sm font-medium text-emerald-700">
-                          {contributor.name.split(' ').map(n => n[0]).join('')}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900">{contributor.name}</p>
-                        <p className="text-sm text-gray-600">{contributor.answers} answers</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm font-medium text-gray-900">{contributor.reputation}</span>
-                      {contributor.trend === "up" ? (
-                        <ArrowUp className="w-4 h-4 text-green-500" />
-                      ) : (
-                        <ArrowDown className="w-4 h-4 text-red-500" />
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <div className="text-2xl font-bold text-gray-900">
+                {stats.answered}
               </div>
             </CardContent>
           </Card>
         </div>
 
+        {/* Weekly Activity */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Weekly Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={weeklyData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day" />
+                <YAxis />
+                <Tooltip />
+                <Area
+                  type="monotone"
+                  dataKey="questions"
+                  fill="#10b981"
+                  stroke="#10b981"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="answers"
+                  fill="#3b82f6"
+                  stroke="#3b82f6"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Role-based Content */}
+        {userProfile?.role === "admin" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Admin Panel</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p>Here you can manage users, data, and platform analytics.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {userProfile?.role === "support_agent" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Support Tools</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p>Access moderation and unresolved tickets here.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Top Contributors */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Top Contributors</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {topContributors.map((contributor, index) => (
+              <div key={index} className="flex justify-between">
+                <span>{contributor.name}</span>
+                <span>{contributor.reputation} pts</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
         {/* Recent Questions */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg font-semibold text-gray-900">Recent Questions</CardTitle>
+            <CardTitle>Recent Questions</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentQuestions.map((question, index) => (
-                <div key={index} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-                  <div className="flex-1">
-                    <h3 className="font-medium text-gray-900 hover:text-emerald-600 cursor-pointer">
-                      {question.title}
-                    </h3>
-                    <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600">
-                      <span className="flex items-center">
-                        <Eye className="w-4 h-4 mr-1" />
-                        {question.views} views
-                      </span>
-                      <span className="flex items-center">
-                        <MessageSquare className="w-4 h-4 mr-1" />
-                        {question.answers} answers
-                      </span>
-                      <span className="flex items-center">
-                        <ArrowUp className="w-4 h-4 mr-1" />
-                        {question.votes} votes
-                      </span>
-                    </div>
-                  </div>
+          <CardContent className="space-y-3">
+            {recentQuestions.map((q, i) => (
+              <div key={i} className="border-b pb-2">
+                <h4 className="font-medium">{q.title}</h4>
+                <div className="text-sm text-gray-600">
+                  {q.views} views · {q.answersCount} answers · {q.votes} votes
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>

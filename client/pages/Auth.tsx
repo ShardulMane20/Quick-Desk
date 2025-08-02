@@ -1,37 +1,47 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth,} from "@/firebase";
-import { db } from "@/firebase";
+import { auth, db } from "@/firebase";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger}from "@/components/ui/tabs"
+  import {Button,
+} from "@/components/ui/button"
+import {  Input}from "@/components/ui/input"
+import {  Label}from "@/components/ui/label"
 import { LifeBuoy, Eye, EyeOff } from "lucide-react";
 
 export default function Auth() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
-  const [loginData, setLoginData] = useState({ email: "", password: "" });
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  const [loginData, setLoginData] = useState({
+    email: "",
+    password: "",
+  });
+
   const [registerData, setRegisterData] = useState({
     firstName: "",
     lastName: "",
     email: "",
     password: "",
     confirmPassword: "",
-    role: "end_user",
   });
 
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authLoading, setAuthLoading] = useState(false);
-
-  // Login
+  // LOGIN
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -52,7 +62,7 @@ export default function Auth() {
     }
   };
 
-  // Register
+  // REGISTER
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -74,7 +84,8 @@ export default function Auth() {
         email: registerData.email,
         firstName: registerData.firstName,
         lastName: registerData.lastName,
-        role: registerData.role,
+        role: "user", // 👈 Default role
+        createdAt: new Date(),
       });
 
       navigate("/dashboard");
@@ -114,7 +125,7 @@ export default function Auth() {
                 <TabsTrigger value="register">Sign Up</TabsTrigger>
               </TabsList>
 
-              {/* Login Tab */}
+              {/* Login */}
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div>
@@ -123,25 +134,20 @@ export default function Auth() {
                       id="login-email"
                       type="email"
                       value={loginData.email}
-                      onChange={(e) =>
-                        setLoginData({ ...loginData, email: e.target.value })
-                      }
+                      onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
                       placeholder="your@email.com"
-                      className="mt-1"
                       required
                     />
                   </div>
 
                   <div>
                     <Label htmlFor="login-password">Password</Label>
-                    <div className="relative mt-1">
+                    <div className="relative">
                       <Input
                         id="login-password"
                         type={showPassword ? "text" : "password"}
                         value={loginData.password}
-                        onChange={(e) =>
-                          setLoginData({ ...loginData, password: e.target.value })
-                        }
+                        onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
                         placeholder="Enter your password"
                         className="pr-12"
                         required
@@ -151,28 +157,20 @@ export default function Auth() {
                         onClick={() => setShowPassword(!showPassword)}
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                       >
-                        {showPassword ? (
-                          <EyeOff className="w-5 h-5" />
-                        ) : (
-                          <Eye className="w-5 h-5" />
-                        )}
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                       </button>
                     </div>
                   </div>
 
                   {authError && <p className="text-sm text-red-600">{authError}</p>}
 
-                  <Button
-                    type="submit"
-                    disabled={authLoading}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
-                  >
+                  <Button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-700">
                     {authLoading ? "Signing In..." : "Sign In"}
                   </Button>
                 </form>
               </TabsContent>
 
-              {/* Register Tab */}
+              {/* Register */}
               <TabsContent value="register">
                 <form onSubmit={handleRegister} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -181,14 +179,8 @@ export default function Auth() {
                       <Input
                         id="firstName"
                         value={registerData.firstName}
-                        onChange={(e) =>
-                          setRegisterData({
-                            ...registerData,
-                            firstName: e.target.value,
-                          })
-                        }
+                        onChange={(e) => setRegisterData({ ...registerData, firstName: e.target.value })}
                         placeholder="John"
-                        className="mt-1"
                         required
                       />
                     </div>
@@ -197,14 +189,8 @@ export default function Auth() {
                       <Input
                         id="lastName"
                         value={registerData.lastName}
-                        onChange={(e) =>
-                          setRegisterData({
-                            ...registerData,
-                            lastName: e.target.value,
-                          })
-                        }
+                        onChange={(e) => setRegisterData({ ...registerData, lastName: e.target.value })}
                         placeholder="Doe"
-                        className="mt-1"
                         required
                       />
                     </div>
@@ -216,35 +202,10 @@ export default function Auth() {
                       id="register-email"
                       type="email"
                       value={registerData.email}
-                      onChange={(e) =>
-                        setRegisterData({
-                          ...registerData,
-                          email: e.target.value,
-                        })
-                      }
-                      placeholder="your@email.com"
-                      className="mt-1"
+                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
+                      placeholder="you@example.com"
                       required
                     />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="role">Account Type</Label>
-                    <Select
-                      value={registerData.role}
-                      onValueChange={(value) =>
-                        setRegisterData({ ...registerData, role: value })
-                      }
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select account type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="end_user">End User</SelectItem>
-                        <SelectItem value="support_agent">Support Agent</SelectItem>
-                        <SelectItem value="admin">Administrator</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
 
                   <div>
@@ -253,14 +214,8 @@ export default function Auth() {
                       id="register-password"
                       type="password"
                       value={registerData.password}
-                      onChange={(e) =>
-                        setRegisterData({
-                          ...registerData,
-                          password: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
                       placeholder="Create a password"
-                      className="mt-1"
                       required
                     />
                   </div>
@@ -271,41 +226,22 @@ export default function Auth() {
                       id="confirm-password"
                       type="password"
                       value={registerData.confirmPassword}
-                      onChange={(e) =>
-                        setRegisterData({
-                          ...registerData,
-                          confirmPassword: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
                       placeholder="Confirm your password"
-                      className="mt-1"
                       required
                     />
                   </div>
 
                   {authError && <p className="text-sm text-red-600">{authError}</p>}
 
-                  <Button
-                    type="submit"
-                    disabled={authLoading}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
-                  >
-                    {authLoading ? "Creating..." : "Create Account"}
+                  <Button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-700">
+                    {authLoading ? "Creating Account..." : "Create Account"}
                   </Button>
                 </form>
               </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
-
-        <div className="mt-6 p-4 bg-white rounded-lg shadow text-center">
-          <p className="text-sm text-gray-600 mb-2">Demo Credentials:</p>
-          <div className="text-xs text-gray-500 space-y-1">
-            <p><strong>User:</strong> user@demo.com / password</p>
-            <p><strong>Agent:</strong> agent@demo.com / password</p>
-            <p><strong>Admin:</strong> admin@demo.com / password</p>
-          </div>
-        </div>
       </div>
     </div>
   );
