@@ -58,7 +58,7 @@ export function Layout({ children }: LayoutProps) {
               >
                 Questions
               </Link>
-              <Link to="/ask">
+              <Link to="/create-ticket">
                 <Button className="bg-emerald-500 hover:bg-emerald-600 text-white">
                   <Plus className="w-4 h-4 mr-2" />
                   Ask Question
