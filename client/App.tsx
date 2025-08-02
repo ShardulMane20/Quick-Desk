@@ -13,7 +13,7 @@ import CreateTicket from "./pages/CreateTicket";
 import TicketDetail from "./pages/TicketDetail";
 import NotFound from "./pages/NotFound";
 import Dashboard from "./pages/Dashboard";
-
+import AgentDashboard from "./pages/AgentDashboard";
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -32,6 +32,8 @@ const App = () => (
           <Route path="/my-tickets" element={<TicketManager />} />
           <Route path="/create-ticket" element={<CreateTicket />} />
           <Route path="/ticket/:id" element={<TicketDetail />} />
+          <Route path="/agent-dashboard" element={<AgentDashboard />} />
+          
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
