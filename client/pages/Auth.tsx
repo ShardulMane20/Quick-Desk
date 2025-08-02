@@ -53,7 +53,7 @@ const handleLogin = async (e: React.FormEvent) => {
 
     // 🔍 Fetch user role from Firestore
     const userDoc = await getDoc(doc(db, "users", user.uid));
-    const role = userDoc.data()?.role || "end_user";
+    const role = userDoc.data()?.role || "user";
 
     // 🌐 Store locally (optional)
     localStorage.setItem("user", JSON.stringify({ uid: user.uid, email: user.email, role }));
@@ -61,6 +61,8 @@ const handleLogin = async (e: React.FormEvent) => {
     // 🔁 Redirect based on role
     if (role === "admin") {
       navigate("/admin");
+    } else if (role === "agent") {
+      navigate("/agent-dashboard");
     } else {
       navigate("/dashboard");
     }
@@ -76,9 +78,7 @@ const handleLogin = async (e: React.FormEvent) => {
   } finally {
     setAuthLoading(false);
   }
-};
-
-  // REGISTER
+};  // REGISTER
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);

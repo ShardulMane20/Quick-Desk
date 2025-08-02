@@ -15,6 +15,7 @@ import NotFound from "./pages/NotFound";
 import Dashboard from "./pages/Dashboard";
 import AdminPage from "./pages/AdminPage";
 
+import AgentDashboard from "./pages/AgentDashboard";
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -34,6 +35,8 @@ const App = () => (
           <Route path="/create-ticket" element={<CreateTicket />} />
           <Route path="/ticket/:id" element={<TicketDetail />} />
           <Route path="/admin" element={<AdminPage />} />
+          <Route path="/agent-dashboard" element={<AgentDashboard />} />
+          
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
